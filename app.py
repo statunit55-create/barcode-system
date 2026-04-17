@@ -1,11 +1,10 @@
 from flask import Flask, render_template_string
 from flask_socketio import SocketIO, emit
-import time
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-# ---------------- صفحة الكمبيوتر ----------------
+# ---------------- واجهة الكمبيوتر ----------------
 PC_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -87,7 +86,7 @@ SCAN_PAGE = """
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Scanner Pro</title>
+<title>Scanner</title>
 
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode"></script>
@@ -111,29 +110,44 @@ body {
 <script>
 const socket = io();
 
+// عند نجاح القراءة
 function onScanSuccess(decodedText) {
     socket.emit('barcode', decodedText);
 }
 
-// تشغيل الكاميرا تلقائياً
-let html5QrcodeScanner = new Html5QrcodeScanner(
-    "reader",
-    {
-        fps: 10,
-        qrbox: 250,
-        rememberLastUsedCamera: true,
-        facingMode: "environment"
-    }
-);
+// تشغيل الكاميرا
+const html5QrCode = new Html5Qrcode("reader");
 
-html5QrcodeScanner.render(onScanSuccess);
+Html5Qrcode.getCameras().then(devices => {
+
+    if (devices && devices.length) {
+
+        let cameraId = devices[0].id;
+
+        // اختيار الكاميرا الخلفية إن وجدت
+        for (let d of devices) {
+            if (d.label.toLowerCase().includes("back")) {
+                cameraId = d.id;
+            }
+        }
+
+        html5QrCode.start(
+            cameraId,
+            {
+                fps: 10,
+                qrbox: 250
+            },
+            onScanSuccess
+        );
+    }
+});
 </script>
 
 </body>
 </html>
-""""""
+"""
 
-# ---------------- routes ----------------
+# ---------------- Routes ----------------
 @app.route('/')
 def home():
     return PC_PAGE
@@ -142,11 +156,11 @@ def home():
 def scan():
     return SCAN_PAGE
 
-# ---------------- socket ----------------
+# ---------------- Socket ----------------
 @socketio.on('barcode')
 def handle_barcode(data):
-    print("Barcode:", data)
     emit('barcode', data, broadcast=True)
+    print("Barcode:", data)
 
 # ---------------- تشغيل ----------------
 if __name__ == "__main__":
