@@ -1,58 +1,90 @@
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, jsonify
 from flask_socketio import SocketIO, emit
+import sqlite3
+import time
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
+# ---------------- قاعدة البيانات ----------------
+def init_db():
+    conn = sqlite3.connect("barcodes.db")
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS scans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT,
+            time TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# ---------------- حفظ الباركود ----------------
+def save_barcode(code):
+    conn = sqlite3.connect("barcodes.db")
+    c = conn.cursor()
+
+    # منع التكرار
+    c.execute("SELECT * FROM scans WHERE code=?", (code,))
+    if c.fetchone():
+        conn.close()
+        return False
+
+    c.execute("INSERT INTO scans (code, time) VALUES (?,?)",
+              (code, time.strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    conn.close()
+    return True
+
 # ---------------- واجهة الكمبيوتر ----------------
 PC_PAGE = """
 <!DOCTYPE html>
-<html lang="ar">
+<html>
 <head>
 <meta charset="UTF-8">
-<title>Barcode System</title>
+<title>Barcode System Pro</title>
 
 <style>
 body {
     margin:0;
     font-family: Arial;
-    background: linear-gradient(135deg, #0f172a, #1e293b);
+    background: #0f172a;
     color:white;
     text-align:center;
 }
 
 .card {
-    background: rgba(255,255,255,0.06);
+    background: rgba(255,255,255,0.05);
     margin:20px auto;
     width:70%;
     padding:20px;
-    border-radius:20px;
-    backdrop-filter: blur(10px);
+    border-radius:15px;
 }
 
-#last {
-    font-size:32px;
-    color:#22c55e;
+table {
+    width:100%;
+    color:white;
 }
 
-.list {
-    text-align:left;
-    max-height:300px;
-    overflow:auto;
-}
-
-.item {
-    padding:8px;
-    border-bottom:1px solid rgba(255,255,255,0.1);
+button {
+    padding:10px;
+    background:red;
+    color:white;
+    border:none;
+    cursor:pointer;
 }
 </style>
 
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
 </head>
 
 <body>
 
-<h1>📡 نظام قراءة الباركود</h1>
+<h1>📦 نظام الباركود الاحترافي</h1>
 
 <div class="card">
     <h2>آخر باركود</h2>
@@ -61,7 +93,8 @@ body {
 
 <div class="card">
     <h2>السجل</h2>
-    <div class="list" id="list"></div>
+    <button onclick="clearData()">مسح السجل</button>
+    <table id="table"></table>
 </div>
 
 <script>
@@ -69,24 +102,24 @@ var socket = io();
 
 socket.on('barcode', function(data){
 
-    document.getElementById("last").innerText = data;
+    document.getElementById("last").innerText = data.code;
 
-    let div = document.createElement("div");
-    div.className = "item";
-    div.innerText = data;
+    let row = `<tr><td>${data.code}</td><td>${data.time}</td></tr>`;
+    document.getElementById("table").innerHTML += row;
 
-    document.getElementById("list").prepend(div);
-
-    // صوت
     new Audio("https://www.soundjay.com/buttons/sounds/button-3.mp3").play();
 });
+
+function clearData(){
+    fetch('/clear').then(()=> location.reload());
+}
 </script>
 
 </body>
 </html>
 """
 
-# ---------------- صفحة الهاتف (الكاميرا) ----------------
+# ---------------- صفحة الهاتف ----------------
 SCAN_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -98,15 +131,8 @@ SCAN_PAGE = """
 <script src="https://unpkg.com/@zxing/library@latest"></script>
 
 <style>
-body {
-    margin:0;
-    background:black;
-}
-video {
-    width:100%;
-    height:100vh;
-    object-fit:cover;
-}
+body { margin:0; background:black; }
+video { width:100%; height:100vh; object-fit:cover; }
 </style>
 
 </head>
@@ -117,24 +143,21 @@ video {
 
 <script>
 const socket = io();
-const codeReader = new ZXing.BrowserMultiFormatReader();
+const reader = new ZXing.BrowserMultiFormatReader();
 
-codeReader.listVideoInputDevices()
-.then((devices) => {
+reader.listVideoInputDevices().then((devices)=>{
 
-    const deviceId = devices[0].deviceId;
+    const id = devices[0].deviceId;
 
-    codeReader.decodeFromVideoDevice(deviceId, 'video', (result, err) => {
+    reader.decodeFromVideoDevice(id, 'video', (result, err)=>{
 
-        if (result) {
+        if(result){
             socket.emit('barcode', result.text);
-            console.log("Scanned:", result.text);
         }
 
     });
 
-})
-.catch(err => console.log(err));
+});
 </script>
 
 </body>
@@ -144,20 +167,32 @@ codeReader.listVideoInputDevices()
 # ---------------- Routes ----------------
 @app.route('/')
 def home():
-    return render_template_string(PC_PAGE)
+    return PC_PAGE
 
 @app.route('/scan')
 def scan():
-    return render_template_string(SCAN_PAGE)
+    return SCAN_PAGE
+
+@app.route('/clear')
+def clear():
+    conn = sqlite3.connect("barcodes.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM scans")
+    conn.commit()
+    conn.close()
+    return "ok"
 
 # ---------------- Socket ----------------
 @socketio.on('barcode')
 def handle_barcode(data):
-    emit('barcode', data, broadcast=True)
-    print("Barcode:", data)
+    saved = save_barcode(data)
+
+    if saved:
+        emit('barcode', {
+            "code": data,
+            "time": time.strftime("%H:%M:%S")
+        }, broadcast=True)
 
 # ---------------- تشغيل ----------------
-if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000)
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
