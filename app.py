@@ -4,10 +4,10 @@ from flask_socketio import SocketIO, emit
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-# ---------------- واجهة الكمبيوتر ----------------
+# ================== صفحة الكمبيوتر ==================
 PC_PAGE = """
 <!DOCTYPE html>
-<html>
+<html lang="ar">
 <head>
 <meta charset="UTF-8">
 <title>Barcode System</title>
@@ -22,7 +22,7 @@ body {
 }
 
 .card {
-    background: rgba(255,255,255,0.05);
+    background: rgba(255,255,255,0.06);
     margin:20px auto;
     width:70%;
     padding:20px;
@@ -30,7 +30,7 @@ body {
 }
 
 #last {
-    font-size:30px;
+    font-size:32px;
     color:#22c55e;
 }
 
@@ -71,7 +71,7 @@ socket.on('barcode', function(data){
 
     document.getElementById("list").prepend(div);
 
-    // صوت نجاح
+    // صوت تنبيه
     new Audio("https://www.soundjay.com/buttons/sounds/button-3.mp3").play();
 });
 </script>
@@ -80,7 +80,7 @@ socket.on('barcode', function(data){
 </html>
 """
 
-# ---------------- صفحة الهاتف (الكاميرا) ----------------
+# ================== صفحة الهاتف ==================
 SCAN_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -89,65 +89,78 @@ SCAN_PAGE = """
 <title>Scanner</title>
 
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-<script src="https://unpkg.com/html5-qrcode"></script>
+
+<!-- مكتبة أقوى وثابتة -->
+<script src="https://unpkg.com/@zxing/library@latest"></script>
 
 <style>
 body {
     margin:0;
     background:black;
 }
-#reader {
-    width:100vw;
+video {
+    width:100%;
     height:100vh;
+    object-fit:cover;
 }
 </style>
+
 </head>
 
 <body>
 
-<div id="reader"></div>
+<video id="video"></video>
 
 <script>
 const socket = io();
+const codeReader = new ZXing.BrowserMultiFormatReader();
 
-// عند نجاح القراءة
-function onScanSuccess(decodedText) {
-    socket.emit('barcode', decodedText);
-}
+let lastCode = "";
 
-// تشغيل الكاميرا
-const html5QrCode = new Html5Qrcode("reader");
+function startScan(){
 
-Html5Qrcode.getCameras().then(devices => {
+    codeReader.listVideoInputDevices()
+    .then((devices) => {
 
-    if (devices && devices.length) {
+        let selectedDeviceId = devices[0].deviceId;
 
-        let cameraId = devices[0].id;
-
-        // اختيار الكاميرا الخلفية إن وجدت
-        for (let d of devices) {
-            if (d.label.toLowerCase().includes("back")) {
-                cameraId = d.id;
+        // اختيار الكاميرا الخلفية
+        for(let d of devices){
+            if(d.label.toLowerCase().includes("back")){
+                selectedDeviceId = d.deviceId;
             }
         }
 
-        html5QrCode.start(
-            cameraId,
-            {
-                fps: 10,
-                qrbox: 250
-            },
-            onScanSuccess
+        codeReader.decodeFromVideoDevice(
+            selectedDeviceId,
+            'video',
+            (result, err) => {
+
+                if(result){
+
+                    // منع التكرار
+                    if(result.text === lastCode) return;
+                    lastCode = result.text;
+
+                    socket.emit('barcode', result.text);
+                    console.log("READ:", result.text);
+                }
+
+            }
         );
-    }
-});
+
+    })
+    .catch(err => console.log(err));
+}
+
+startScan();
 </script>
 
 </body>
 </html>
 """
 
-# ---------------- Routes ----------------
+# ================== Routes ==================
 @app.route('/')
 def home():
     return PC_PAGE
@@ -156,12 +169,12 @@ def home():
 def scan():
     return SCAN_PAGE
 
-# ---------------- Socket ----------------
+# ================== Socket ==================
 @socketio.on('barcode')
 def handle_barcode(data):
-    emit('barcode', data, broadcast=True)
     print("Barcode:", data)
+    emit('barcode', data, broadcast=True)
 
-# ---------------- تشغيل ----------------
+# ================== تشغيل ==================
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
