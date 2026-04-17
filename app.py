@@ -87,65 +87,51 @@ SCAN_PAGE = """
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Scanner</title>
+<title>Scanner Pro</title>
 
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-<script src="https://unpkg.com/@zxing/library@latest"></script>
+<script src="https://unpkg.com/html5-qrcode"></script>
 
 <style>
 body {
     margin:0;
     background:black;
 }
-video {
-    width:100%;
+#reader {
+    width:100vw;
     height:100vh;
-    object-fit:cover;
 }
 </style>
 </head>
 
 <body>
 
-<video id="video"></video>
+<div id="reader"></div>
 
 <script>
 const socket = io();
-const codeReader = new ZXing.BrowserMultiFormatReader();
 
-function startCamera() {
-
-    codeReader.listVideoInputDevices()
-    .then((devices) => {
-
-        let backCamera = devices[0].deviceId;
-
-        // اختيار الكاميرا الخلفية
-        for (let d of devices) {
-            if (d.label.toLowerCase().includes("back")) {
-                backCamera = d.deviceId;
-            }
-        }
-
-        codeReader.decodeFromVideoDevice(backCamera, 'video', (result, err) => {
-
-            if (result) {
-                socket.emit('barcode', result.text);
-                console.log("READ:", result.text);
-            }
-
-        });
-
-    })
-    .catch(err => console.log(err));
+function onScanSuccess(decodedText) {
+    socket.emit('barcode', decodedText);
 }
 
-startCamera();
+// تشغيل الكاميرا تلقائياً
+let html5QrcodeScanner = new Html5QrcodeScanner(
+    "reader",
+    {
+        fps: 10,
+        qrbox: 250,
+        rememberLastUsedCamera: true,
+        facingMode: "environment"
+    }
+);
+
+html5QrcodeScanner.render(onScanSuccess);
 </script>
 
 </body>
 </html>
-"""
+""""""
 
 # ---------------- routes ----------------
 @app.route('/')
