@@ -4,105 +4,89 @@ from flask_socketio import SocketIO, emit
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-barcodes = []
-
-HTML = """
+# ---------------- واجهة الكمبيوتر ----------------
+PC_PAGE = """
 <!DOCTYPE html>
 <html lang="ar">
 <head>
 <meta charset="UTF-8">
-<title>نظام الباركود</title>
+<title>Barcode System</title>
 
 <style>
 body {
     margin:0;
-    font-family: 'Segoe UI';
+    font-family: Arial;
     background: linear-gradient(135deg, #0f172a, #1e293b);
-    color: white;
+    color:white;
     text-align:center;
 }
 
-.container {
-    margin-top: 40px;
-}
-
 .card {
-    background: rgba(255,255,255,0.05);
-    backdrop-filter: blur(12px);
-    padding: 20px;
-    margin: 15px auto;
-    width: 60%;
-    border-radius: 20px;
-    box-shadow: 0 0 20px rgba(0,0,0,0.3);
-}
-
-h1 {
-    color: #38bdf8;
+    background: rgba(255,255,255,0.06);
+    margin:20px auto;
+    width:70%;
+    padding:20px;
+    border-radius:20px;
+    backdrop-filter: blur(10px);
 }
 
 #last {
-    font-size: 30px;
-    color: #22c55e;
+    font-size:32px;
+    color:#22c55e;
 }
 
 .list {
-    max-height: 300px;
-    overflow-y: auto;
     text-align:left;
+    max-height:300px;
+    overflow:auto;
 }
 
 .item {
-    padding: 8px;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
+    padding:8px;
+    border-bottom:1px solid rgba(255,255,255,0.1);
 }
 </style>
 
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-
 </head>
+
 <body>
 
-<div class="container">
-    <h1>📡 نظام قراءة الباركود المباشر</h1>
+<h1>📡 نظام قراءة الباركود</h1>
 
-    <div class="card">
-        <h3>آخر باركود:</h3>
-        <div id="last">---</div>
-    </div>
+<div class="card">
+    <h2>آخر باركود</h2>
+    <div id="last">---</div>
+</div>
 
-    <div class="card">
-        <h3>السجل:</h3>
-        <div class="list" id="list"></div>
-    </div>
-
-    <div class="card">
-        <h3>افتح الرابط من الهاتف:</h3>
-        <p id="link"></p>
-    </div>
+<div class="card">
+    <h2>السجل</h2>
+    <div class="list" id="list"></div>
 </div>
 
 <script>
 var socket = io();
 
 socket.on('barcode', function(data){
+
     document.getElementById("last").innerText = data;
 
-    var list = document.getElementById("list");
-    var item = document.createElement("div");
-    item.className = "item";
-    item.innerText = data;
-    list.prepend(item);
+    let div = document.createElement("div");
+    div.className = "item";
+    div.innerText = data;
 
+    document.getElementById("list").prepend(div);
+
+    // صوت
     new Audio("https://www.soundjay.com/buttons/sounds/button-3.mp3").play();
 });
-
-document.getElementById("link").innerText = window.location.href + "scan";
 </script>
 
 </body>
 </html>
 """
 
+# ---------------- صفحة الهاتف (الكاميرا) ----------------
 SCAN_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -110,17 +94,18 @@ SCAN_PAGE = """
 <meta charset="UTF-8">
 <title>Scanner</title>
 
-<script src="https://unpkg.com/html5-qrcode"></script>
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<script src="https://unpkg.com/@zxing/library@latest"></script>
 
 <style>
 body {
     margin:0;
     background:black;
 }
-#reader {
-    width:100vw;
+video {
+    width:100%;
     height:100vh;
+    object-fit:cover;
 }
 </style>
 
@@ -128,45 +113,51 @@ body {
 
 <body>
 
-<div id="reader"></div>
+<video id="video"></video>
 
 <script>
-var socket = io();
+const socket = io();
+const codeReader = new ZXing.BrowserMultiFormatReader();
 
-function onScanSuccess(decodedText) {
-    socket.emit('barcode', decodedText);
-}
+codeReader.listVideoInputDevices()
+.then((devices) => {
 
-var scanner = new Html5Qrcode("reader");
+    const deviceId = devices[0].deviceId;
 
-scanner.start(
-    { facingMode: "environment" },
-    {
-        fps: 10,
-        qrbox: 250
-    },
-    onScanSuccess
-);
+    codeReader.decodeFromVideoDevice(deviceId, 'video', (result, err) => {
+
+        if (result) {
+            socket.emit('barcode', result.text);
+            console.log("Scanned:", result.text);
+        }
+
+    });
+
+})
+.catch(err => console.log(err));
 </script>
 
 </body>
 </html>
 """
 
+# ---------------- Routes ----------------
 @app.route('/')
-def index():
-    return render_template_string(HTML)
+def home():
+    return render_template_string(PC_PAGE)
 
 @app.route('/scan')
 def scan():
     return render_template_string(SCAN_PAGE)
 
+# ---------------- Socket ----------------
 @socketio.on('barcode')
 def handle_barcode(data):
-    barcodes.append(data)
     emit('barcode', data, broadcast=True)
-    print("تم الاستلام:", data)
+    print("Barcode:", data)
 
-# تشغيل محلي أو على السيرفر
+# ---------------- تشغيل ----------------
+if __name__ == "__main__":
+    socketio.run(app, host="0.0.0.0", port=5000)
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
